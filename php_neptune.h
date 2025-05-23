@@ -1,3 +1,4 @@
+
 /* neptune extension for PHP */
 
 #ifndef PHP_NEPTUNE_H
@@ -11,5 +12,12 @@ extern zend_module_entry neptune_module_entry;
 # if defined(ZTS) && defined(COMPILE_DL_NEPTUNE)
 ZEND_TSRMLS_CACHE_EXTERN()
 # endif
+
+ZEND_BEGIN_MODULE_GLOBALS(neptune)
+    zend_string *hook_name;
+ZEND_END_MODULE_GLOBALS(neptune)
+
+ZEND_EXTERN_MODULE_GLOBALS(neptune)
+#define NEPTUNE_G(v) ZEND_MODULE_GLOBALS_ACCESSOR(neptune, v)
 
 #endif	/* PHP_NEPTUNE_H */
