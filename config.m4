@@ -90,5 +90,8 @@ if test "$PHP_NEPTUNE" != "no"; then
   dnl In case of no dependencies
   AC_DEFINE(HAVE_NEPTUNE, 1, [ Have neptune support ])
 
-  PHP_NEW_EXTENSION(neptune, neptune.c, $ext_shared)
+  neptune_source_file=" \
+    neptune.c \
+    hook.c"  
+  PHP_NEW_EXTENSION(neptune, $neptune_source_file, $ext_shared)
 fi
