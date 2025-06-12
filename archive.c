@@ -88,14 +88,19 @@ static int calculate_checksum(tar_header_t *header) {
     char *p = (char *)header;
 
     // Set checksum field to spaces
-    memset(header->chksum, ' ', TAR_CHKSUM_SIZE);
+    /// *** But it will be change original data, that will be used in other places ***
+    // memset(header->chksum, ' ', TAR_CHKSUM_SIZE);
 
     // Calculate sum
     for (size_t i = 0; i < sizeof(tar_header_t); i++) {
+        // First ignore chksum, later we will uniformly add 256 (8 spaces, 8 * 32 = 256)
+        if (i > 147 && i < 156) {
+            continue;
+        }
         sum += (unsigned char)p[i];
     }
 
-    return sum;
+    return sum + 256;
 }
 
 // Read tar header from file
@@ -318,6 +323,8 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
 
     // Validate mode
     if (ZSTR_LEN(mode) != 1 || (ZSTR_VAL(mode)[0] != 'r' && ZSTR_VAL(mode)[0] != 'w')) {
+        zend_string_release(tarFile);
+        zend_string_release(mode);
         zend_throw_exception(spl_ce_InvalidArgumentException, "Mode must be either 'r' or 'w'", 0);
         return;
     }
@@ -325,6 +332,8 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
     // Check file existence for read mode
     if (ZSTR_VAL(mode)[0] == 'r') {
         if (access(ZSTR_VAL(tarFile), F_OK) == -1) {
+        zend_string_release(tarFile);
+        zend_string_release(mode);
             zend_throw_exception(neptune_tar_file_not_found_exception_ce, "Tar file not found", 0);
             return;
         }
@@ -332,6 +341,8 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
         // Open file for format validation
         FILE *fp = fopen(ZSTR_VAL(tarFile), "rb");
         if (!fp) {
+        zend_string_release(tarFile);
+        zend_string_release(mode);
             zend_throw_exception(zend_ce_exception, "Failed to open tar file for validation", 0);
             return;
         }
@@ -339,6 +350,8 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
         // Validate tar format
         if (validate_tar_format(fp) != 0) {
             fclose(fp);
+            zend_string_release(tarFile);
+            zend_string_release(mode);
             zend_throw_exception(neptune_illegal_tar_format_exception_ce, "Invalid tar file format", 0);
             return;
         }
@@ -375,12 +388,14 @@ PHP_METHOD(Neptune_Archive_Tar, readFile)
     ZEND_PARSE_PARAMETERS_END();
 
     if (!tar->fp) {
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "Tar file not opened", 0);
         return;
     }
 
     // Find file in tar
     if (find_file_in_tar(tar->fp, ZSTR_VAL(filename), &header) != 0) {
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
@@ -393,6 +408,7 @@ PHP_METHOD(Neptune_Archive_Tar, readFile)
 
     // Read file data
     if (fread(ZSTR_VAL(result), 1, size, tar->fp) != size) {
+        zend_string_release(filename);
         zend_string_release(result);
         zend_throw_exception(zend_ce_exception, "Failed to read file data", 0);
         return;
@@ -405,6 +421,7 @@ PHP_METHOD(Neptune_Archive_Tar, readFile)
 
     ZSTR_LEN(result) = size;
     ZSTR_VAL(result)[size] = '\0';
+    zend_string_release(filename);
 
     RETURN_STR(result);
 }
@@ -428,12 +445,16 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     ZEND_PARSE_PARAMETERS_END();
 
     if (!tar->fp) {
+        zend_string_release(filename);
+        zend_string_release(path);
         zend_throw_exception(zend_ce_exception, "Tar file not opened", 0);
         return;
     }
 
     // Find file in tar
     if (find_file_in_tar(tar->fp, ZSTR_VAL(filename), &header) != 0) {
+        zend_string_release(filename);
+        zend_string_release(path);
         zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
@@ -445,6 +466,8 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
         *last_slash = '\0';
         if (mkdir_recursive(dir, 0755) != 0) {
             efree(dir);
+            zend_string_release(filename);
+            zend_string_release(path);
             zend_throw_exception(zend_ce_exception, "Failed to create output directory", 0);
             return;
         }
@@ -454,6 +477,8 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     // Open output file
     outfile = fopen(ZSTR_VAL(path), "wb");
     if (!outfile) {
+        zend_string_release(filename);
+        zend_string_release(path);
         zend_throw_exception(zend_ce_exception, "Failed to create output file", 0);
         return;
     }
@@ -462,6 +487,8 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     size_t size = octal_to_int(header.size, TAR_SIZE_SIZE);
     if (extract_file_data(tar->fp, outfile, size) != 0) {
         fclose(outfile);
+        zend_string_release(filename);
+        zend_string_release(path);
         zend_throw_exception(zend_ce_exception, "Failed to extract file data", 0);
         return;
     }
@@ -479,6 +506,8 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     times[0].tv_sec = times[1].tv_sec = octal_to_int(header.mtime, TAR_MTIME_SIZE);
     times[0].tv_nsec = times[1].tv_nsec = 0;
     utimensat(AT_FDCWD, ZSTR_VAL(path), times, 0);
+    zend_string_release(filename);
+    zend_string_release(path);
 }
 ZEND_BEGIN_ARG_INFO(arginfo_neptune_tar_extractFile, 0)
     ZEND_ARG_INFO(0, filename)
@@ -503,12 +532,14 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
     source_tar = Z_NEPTUNE_TAR_P(source_tar_obj);
 
     if (!tar->fp || !source_tar->fp) {
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "Tar file not opened", 0);
         return;
     }
 
     // Find file in source tar
     if (find_file_in_tar(source_tar->fp, ZSTR_VAL(filename), &header) != 0) {
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "File not found in source tar archive", 0);
         return;
     }
@@ -519,6 +550,7 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
     // Write header to target tar
     if (write_tar_header(tar->fp, &header) != 0) {
         fseek(tar->fp, pos, SEEK_SET);
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "Failed to write tar header", 0);
         return;
     }
@@ -527,6 +559,7 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
     size_t size = octal_to_int(header.size, TAR_SIZE_SIZE);
     if (copy_file_data(source_tar->fp, tar->fp, size) != 0) {
         fseek(tar->fp, pos, SEEK_SET);
+        zend_string_release(filename);
         zend_throw_exception(zend_ce_exception, "Failed to copy file data", 0);
         return;
     }
@@ -534,6 +567,7 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
     // Update tar size
     tar->size = ftell(tar->fp);
     tar->origin_size += size;
+    zend_string_release(filename);
 }
 
 ZEND_BEGIN_ARG_INFO(arginfo_neptune_tar_addFrom, 0)
