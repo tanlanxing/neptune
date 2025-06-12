@@ -1,6 +1,5 @@
-
 /* neptune extension for PHP */
-
+#include "php.h"
 #ifndef PHP_NEPTUNE_H
 # define PHP_NEPTUNE_H
 

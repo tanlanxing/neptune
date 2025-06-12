@@ -92,6 +92,7 @@ if test "$PHP_NEPTUNE" != "no"; then
 
   neptune_source_file=" \
     neptune.c \
-    hook.c"  
+    hook.c \
+    archive.c"
   PHP_NEW_EXTENSION(neptune, $neptune_source_file, $ext_shared)
 fi

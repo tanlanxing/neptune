@@ -12,6 +12,7 @@
 #include "Zend/zend_types.h"
 #include "php_neptune.h"
 #include "hook.h"
+#include "archive.h"
 
 
 /* For compatibility with older PHP versions */
@@ -96,6 +97,7 @@ PHP_MINIT_FUNCTION(neptune)
     REGISTER_INI_ENTRIES();
 
     neptune_hook_init();
+	neptune_archive_init();
 
     return SUCCESS;
 }
