@@ -83,8 +83,7 @@ PHP_GINIT_FUNCTION(neptune)
 #if defined(COMPILE_DL_BCMATH) && defined(ZTS)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
-    static char *empty_str = "";
-    neptune_globals->hook_name = zend_string_init(empty_str, strlen(empty_str), 1);
+    neptune_globals->hook_name = "";
 }
 
 // Module initialization
@@ -95,7 +94,6 @@ PHP_MINIT_FUNCTION(neptune)
     zend_function *target_method;
 
     REGISTER_INI_ENTRIES();
-
 
     neptune_hook_init();
 

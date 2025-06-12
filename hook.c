@@ -146,14 +146,14 @@ static void my_handler(zend_execute_data *execute_data, zval *return_value)
 
     // Call the original mysqli_stmt_bind_result handler
     // We call the handler directly from the stored original function struct.
-    if (pre->func->common.scope) {
-        class_name = ZSTR_VAL(pre->func->common.scope->name);
+    if (execute_data->func->common.scope) {
+        class_name = ZSTR_VAL(execute_data->func->common.scope->name);
     }
-    if (pre->func->common.function_name) {
+    if (execute_data->func->common.function_name) {
         if (class_name) {
-            snprintf(function_name, 1024, "%s::%s", class_name, ZSTR_VAL(pre->func->common.function_name));
+            snprintf(function_name, 1024, "%s::%s", class_name, ZSTR_VAL(execute_data->func->common.function_name));
         } else {
-            strcpy(function_name, ZSTR_VAL(pre->func->common.function_name));
+            strcpy(function_name, ZSTR_VAL(execute_data->func->common.function_name));
         }
     }
     if (strlen(function_name) > 0) {
@@ -204,7 +204,6 @@ void hook_method(char *method_name)
     str_dup = estrndup(method_name, strlen(method_name));
     class_name = php_strtok_r(str_dup, delim, &saveptr);
     function_name = php_strtok_r(NULL, delim, &saveptr);
-    efree(str_dup);
 
     zend_class_entry *target_ce;
     zend_function *target_method;
@@ -227,6 +226,7 @@ void hook_method(char *method_name)
     } else {
         php_error_docref(NULL, E_WARNING, "Could not find mysqli_stmt class entry. Is mysqli loaded?");
     }
+    efree(str_dup);
     zend_string_release(z_method_name);
     zend_string_release(cname); // Release the zend_string for the class name
     zend_string_release(mname); // Release the zend_string for the method name
@@ -234,7 +234,7 @@ void hook_method(char *method_name)
 
 void neptune_hook_init(void)
 {
-    zend_string *hook_name = NULL;
+    char *hook_name = NULL;
     const char *delim = ",";
     const char *delim1 = "::";
     char *found = NULL;
@@ -242,14 +242,14 @@ void neptune_hook_init(void)
 
     hook_name = NEPTUNE_G(hook_name);
     // php_printf("directive hook_name is %s .\n", ZSTR_VAL(hook_name));
-    if (ZSTR_LEN(hook_name) <= 0) {
+    if (strlen(hook_name) <= 0) {
         return;
     }
 
-    ALLOC_HASHTABLE(original_handlers);
-    zend_hash_init(original_handlers, 0, NULL, ZVAL_PTR_DTOR, 0);
+    original_handlers = pemalloc(sizeof(HashTable), 1);
+    zend_hash_init(original_handlers, 0, NULL, ZVAL_PTR_DTOR, 1);
 
-    str_dup = estrndup(ZSTR_VAL(hook_name), ZSTR_LEN(hook_name));
+    str_dup = estrndup(hook_name, strlen(hook_name));
     token = php_strtok_r(str_dup, delim, &saveptr);
 
     while (token) {
@@ -266,5 +266,4 @@ void neptune_hook_init(void)
     }
 
     efree(str_dup);
-    zend_string_release(hook_name);
 }

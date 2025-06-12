@@ -14,7 +14,7 @@ ZEND_TSRMLS_CACHE_EXTERN()
 # endif
 
 ZEND_BEGIN_MODULE_GLOBALS(neptune)
-    zend_string *hook_name;
+    char *hook_name;
 ZEND_END_MODULE_GLOBALS(neptune)
 
 ZEND_EXTERN_MODULE_GLOBALS(neptune)
