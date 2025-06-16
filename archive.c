@@ -19,16 +19,16 @@ zend_class_entry *neptune_tar_ce;
 static zend_object_handlers neptune_tar_handlers;
 
 typedef struct {
-    zend_object std;
     zend_string *tarFile;
     zend_string *mode;
     FILE *fp;
     zend_long size;
     zend_long origin_size;
+    zend_object std;
 } neptune_tar_t;
 
 #define Z_NEPTUNE_TAR_P(zv) \
-    ((neptune_tar_t*)(char *)(Z_OBJ_P(zv)) - XtOffsetOf(neptune_tar_t, std))
+    ((neptune_tar_t*)((char *)(Z_OBJ_P(zv)) - XtOffsetOf(neptune_tar_t, std)))
 
 zend_object *neptune_archive_tar_new(zend_class_entry *ce)
 {
@@ -40,7 +40,7 @@ zend_object *neptune_archive_tar_new(zend_class_entry *ce)
 }
 
 // Forward declarations
-static void neptune_tar_free_storage(zend_object *object);
+static void neptune_tar_free_storage(neptune_tar_t *tar);
 static zend_object *neptune_tar_create_object(zend_class_entry *class_type);
 
 // Helper function to convert octal string to integer
@@ -88,14 +88,19 @@ static int calculate_checksum(tar_header_t *header) {
     char *p = (char *)header;
 
     // Set checksum field to spaces
-    memset(header->chksum, ' ', TAR_CHKSUM_SIZE);
+    /// *** But it will be change original data, that will be used in other places ***
+    // memset(header->chksum, ' ', TAR_CHKSUM_SIZE);
 
     // Calculate sum
     for (size_t i = 0; i < sizeof(tar_header_t); i++) {
+        // First ignore chksum, later we will uniformly add 256 (8 spaces, 8 * 32 = 256)
+        if (i > 147 && i < 156) {
+            continue;
+        }
         sum += (unsigned char)p[i];
     }
 
-    return sum;
+    return sum + 256;
 }
 
 // Read tar header from file
@@ -240,10 +245,8 @@ static int mkdir_recursive(const char *path, mode_t mode) {
 }
 
 // Object handlers
-static void neptune_tar_free_storage(zend_object *object)
+static void neptune_tar_free_storage(neptune_tar_t *tar)
 {
-    neptune_tar_t *tar = (neptune_tar_t *)object;
-
     if (tar->fp) {
         fclose(tar->fp);
     }
@@ -254,7 +257,7 @@ static void neptune_tar_free_storage(zend_object *object)
         zend_string_release(tar->mode);
     }
 
-    zend_object_std_dtor(object);
+    zend_object_std_dtor(&tar->std);
 }
 
 static zend_object *neptune_tar_create_object(zend_class_entry *class_type)
@@ -272,8 +275,7 @@ static zend_object *neptune_tar_create_object(zend_class_entry *class_type)
 // Open method implementation
 static void neptune_tar_open_internal(neptune_tar_t *tar)
 {
-    char *mode = ZSTR_VAL(tar->mode)[0] == 'r' ? "rb+" : "wb+";
-
+    FILE * tmp_fp;
     if (tar->fp) {
         fclose(tar->fp);
     }
@@ -291,9 +293,18 @@ static void neptune_tar_open_internal(neptune_tar_t *tar)
             }
         }
         efree(dir);
+        if (access(ZSTR_VAL(tar->tarFile), F_OK) == -1) {
+            tmp_fp = fopen(ZSTR_VAL(tar->tarFile), "w");
+            if (!tmp_fp) {
+                zend_throw_exception(zend_ce_exception, "Failed to create tar file", 0);
+                return;
+            } else {
+                fclose(tmp_fp);
+            }
+        }
     }
 
-    tar->fp = fopen(ZSTR_VAL(tar->tarFile), mode);
+    tar->fp = fopen(ZSTR_VAL(tar->tarFile), "rb+");
     if (!tar->fp) {
         zend_throw_exception(zend_ce_exception, "Failed to open tar file", 0);
         return;
@@ -360,6 +371,15 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
 ZEND_BEGIN_ARG_INFO(arginfo_neptune_tar_construct, 0)
     ZEND_ARG_INFO(0, tarFile)
     ZEND_ARG_INFO(0, mode)
+ZEND_END_ARG_INFO()
+
+PHP_METHOD(Neptune_Archive_Tar, __destruct)
+{
+    neptune_tar_t *tar = Z_NEPTUNE_TAR_P(ZEND_THIS);
+    neptune_tar_free_storage(tar);
+}
+
+ZEND_BEGIN_ARG_INFO(arginfo_neptune_tar_destruct, 0)
 ZEND_END_ARG_INFO()
 
 // Read file method implementation
@@ -544,6 +564,7 @@ ZEND_END_ARG_INFO()
 
 static zend_function_entry neptune_tar_methods[] = {
     PHP_ME(Neptune_Archive_Tar, __construct, arginfo_neptune_tar_construct, ZEND_ACC_PUBLIC)
+    PHP_ME(Neptune_Archive_Tar, __destruct, arginfo_neptune_tar_destruct, ZEND_ACC_PUBLIC)
     PHP_ME(Neptune_Archive_Tar, readFile, arginfo_neptune_tar_readFile, ZEND_ACC_PUBLIC)
     PHP_ME(Neptune_Archive_Tar, extractFile, arginfo_neptune_tar_extractFile, ZEND_ACC_PUBLIC)
     PHP_ME(Neptune_Archive_Tar, addFrom, arginfo_neptune_tar_addFrom, ZEND_ACC_PUBLIC)
