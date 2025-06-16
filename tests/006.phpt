@@ -15,9 +15,10 @@ use Neptune\Archive\Tar;
 function test_Neptune_Archive_Tar_addFrom() {
 	clean();
 	$currPath = dirname(realpath(__file__));	
-	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt 003.phpt 004.phpt 005.phpt 006.phpt';
+	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt 003.phpt 004.phpt 005.phpt 006.phpt 2>&1';
 	exec($cmd, $output, $status);
 	if ($status !=0) {
+		print_r($output);
 		echo 'skip';
 		return;
 	}
@@ -51,9 +52,10 @@ function clean() {
     }
 
 	if (file_exists($currPath . '/out')) {
-		$cmd = 'rm -rf ' . $currPath . '/out';
+		$cmd = 'rm -rf ' . $currPath . '/out 2>&1';
 		exec($cmd, $output, $status);
 		if ($status !=0) {
+			print_r($output);
 			echo 'skip';
 			return;
 		}
