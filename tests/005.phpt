@@ -13,35 +13,45 @@ use Neptune\Archive\Tar;
 function test_Neptune_Archive_Tar_addFrom() {
 	clean();
 	$currPath = dirname(realpath(__file__));	
-	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt';
+	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt 2>&1';
 	exec($cmd, $output, $status);
 	if ($status !=0) {
+		print_r($output);
 		echo 'skip';
 		return;
 	}
-	$srcTar = new Tar($currPath . '/test.tar', 'r');
-	$newTar = new Tar($currPath . '/new.tar', 'w');
-	$newTar->addFrom($srcTar, '001.phpt');
-	unset($srcTar, $newTar);
 
-	if (!file_exists($currPath . '/out')) {
-		if (!mkdir($currPath . '/out', 0755, true)) {
+	$args = [
+		false,
+		true
+	];
+	foreach($args as $arg) {
+		$srcTar = new Tar($currPath . '/test.tar', 'r', $arg);
+		$newTar = new Tar($currPath . '/new.tar', 'w', $arg);
+		$newTar->addFrom($srcTar, '001.phpt');
+		unset($srcTar, $newTar);
+
+		if (!file_exists($currPath . '/out')) {
+			if (!mkdir($currPath . '/out', 0755, true)) {
+				echo 'skip';
+				return;
+			}
+		}
+
+		$cmd = 'cd ' . $currPath . '; tar -xf new.tar -C out/ 2>&1';
+		unset($output);
+		exec($cmd, $output, $status);
+		if ($status !=0) {
+			print_r($output);
 			echo 'skip';
 			return;
 		}
-	}
 
-	$cmd = 'cd ' . $currPath . '; tar -xf new.tar -C out/';
-	exec($cmd, $output, $status);
-	if ($status !=0) {
-		echo 'skip';
-		return;
+		if (md5_file($currPath . '/001.phpt') == md5_file($currPath . '/out/001.phpt')) {
+			echo 'OK';
+		}
+		unlink($currPath . '/new.tar');
 	}
-
-	if (md5_file($currPath . '/001.phpt') == md5_file($currPath . '/out/001.phpt')) {
-		echo 'OK';
-	}
-
 	clean();
 }
 
@@ -55,9 +65,10 @@ function clean() {
     }
 
 	if (file_exists($currPath . '/out')) {
-		$cmd = 'rm -rf ' . $currPath . '/out';
+		$cmd = 'rm -rf ' . $currPath . '/out 2>&1';
 		exec($cmd, $output, $status);
 		if ($status !=0) {
+			print_r($output);
 			echo 'skip';
 			return;
 		}
@@ -67,4 +78,4 @@ function clean() {
 test_Neptune_Archive_Tar_addFrom();
 ?>
 --EXPECT--
-OK
+OKOK

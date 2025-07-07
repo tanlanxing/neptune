@@ -15,14 +15,21 @@ function test() {
 	if (file_exists($currPath . '/test.tar')) {
         unlink($currPath . '/test.tar');
     }
-	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt';
+	$cmd = 'cd ' . $currPath . '; tar -cf test.tar 001.phpt 002.phpt 2>&1';
 	exec($cmd, $output, $status);
 	if ($status !=0) {
+		print_r($output);
 		echo 'skip';
 		return;
 	}
-	$tar = new Tar($currPath . '/test.tar', 'r');
-	unset($tar);
+	$args = [
+		[$currPath . '/test.tar', 'r'],
+		[$currPath . '/test.tar', 'r', true]
+	];
+	foreach($args as $arg) {
+		$tar = new Tar(...$arg);
+		unset($tar);
+	}
 	unlink($currPath . '/test.tar');
 	echo 'OK';
 }

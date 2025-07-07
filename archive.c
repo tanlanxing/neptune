@@ -18,17 +18,7 @@ zend_class_entry *neptune_tar_ce;
 // Tar class property definitions
 static zend_object_handlers neptune_tar_handlers;
 
-typedef struct {
-    zend_string *tarFile;
-    zend_string *mode;
-    FILE *fp;
-    zend_long size;
-    zend_long origin_size;
-    zend_object std;
-} neptune_tar_t;
 
-#define Z_NEPTUNE_TAR_P(zv) \
-    ((neptune_tar_t*)((char *)(Z_OBJ_P(zv)) - XtOffsetOf(neptune_tar_t, std)))
 
 zend_object *neptune_archive_tar_new(zend_class_entry *ce)
 {
@@ -104,16 +94,19 @@ static int calculate_checksum(tar_header_t *header) {
 }
 
 // Read tar header from file
-static int read_tar_header(FILE *fp, tar_header_t *header) {
+static int read_tar_header(FILE *fp, tar_header_t *header, bool checkChesum) {
     if (fread(header, 1, sizeof(tar_header_t), fp) != sizeof(tar_header_t)) {
         return -1;
     }
 
     // Verify checksum
-    int checksum = calculate_checksum(header);
-    int stored_checksum = octal_to_int(header->chksum, TAR_CHKSUM_SIZE);
+    if (checkChesum) {
+        int checksum = calculate_checksum(header);
+        int stored_checksum = octal_to_int(header->chksum, TAR_CHKSUM_SIZE);
 
-    return (checksum == stored_checksum) ? 0 : -1;
+        return (checksum == stored_checksum) ? 0 : -1;
+    }
+    return 0;
 }
 
 // Write tar header to file
@@ -126,12 +119,12 @@ static int write_tar_header(FILE *fp, tar_header_t *header) {
 }
 
 // Validate tar file format
-static int validate_tar_format(FILE *fp) {
+static int validate_tar_format(FILE *fp, bool checkChksum) {
     tar_header_t header;
     long pos = ftell(fp);
 
     // Read first header
-    if (read_tar_header(fp, &header) != 0) {
+    if (read_tar_header(fp, &header, checkChksum) != 0) {
         fseek(fp, pos, SEEK_SET);
         return -1;
     }
@@ -147,11 +140,11 @@ static int validate_tar_format(FILE *fp) {
 }
 
 // Find file in tar archive
-static int find_file_in_tar(FILE *fp, const char *filename, tar_header_t *header) {
-    long pos = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+static int find_file_in_tar(neptune_tar_t *tar, const char *filename, tar_header_t *header) {
+    long pos = ftell(tar->fp);
+    fseek(tar->fp, 0, SEEK_SET);
 
-    while (read_tar_header(fp, header) == 0) {
+    while (read_tar_header(tar->fp, header, tar->checkChksum) == 0) {
         if (strcmp(header->name, filename) == 0) {
             return 0;
         }
@@ -159,10 +152,10 @@ static int find_file_in_tar(FILE *fp, const char *filename, tar_header_t *header
         // Skip file data
         size_t size = octal_to_int(header->size, TAR_SIZE_SIZE);
         size_t blocks = (size + TAR_BLOCK_SIZE - 1) / TAR_BLOCK_SIZE;
-        fseek(fp, blocks * TAR_BLOCK_SIZE, SEEK_CUR);
+        fseek(tar->fp, blocks * TAR_BLOCK_SIZE, SEEK_CUR);
     }
 
-    fseek(fp, pos, SEEK_SET);
+    fseek(tar->fp, pos, SEEK_SET);
     return -1;
 }
 
@@ -196,7 +189,14 @@ static int extract_file_data(FILE *src, FILE *dst, size_t size) {
 
 // Copy file data between tar files
 static int copy_file_data(FILE *src, FILE *dst, size_t size) {
-    return extract_file_data(src, dst, size);
+    int ret;
+    if (size % TAR_BLOCK_SIZE != 0) {
+        size += TAR_BLOCK_SIZE - (size % TAR_BLOCK_SIZE);
+    }
+    if ((ret = extract_file_data(src, dst, size)) != 0) {
+        return ret;
+    }
+    return 0;
 }
 
 // Recursive directory creation
@@ -320,11 +320,14 @@ static void neptune_tar_open_internal(neptune_tar_t *tar)
 PHP_METHOD(Neptune_Archive_Tar, __construct)
 {
     zend_string *tarFile, *mode;
+    zend_bool checkChksum = false;
     neptune_tar_t *tar = Z_NEPTUNE_TAR_P(ZEND_THIS);
 
-    ZEND_PARSE_PARAMETERS_START(2, 2)
+    ZEND_PARSE_PARAMETERS_START(2, 3)
         Z_PARAM_STR(tarFile)
         Z_PARAM_STR(mode)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_BOOL(checkChksum)
     ZEND_PARSE_PARAMETERS_END();
 
     // Validate mode
@@ -348,7 +351,7 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
         }
 
         // Validate tar format
-        if (validate_tar_format(fp) != 0) {
+        if (validate_tar_format(fp, checkChksum) != 0) {
             fclose(fp);
             zend_throw_exception(neptune_illegal_tar_format_exception_ce, "Invalid tar file format", 0);
             return;
@@ -360,6 +363,7 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
     // Store properties
     tar->tarFile = zend_string_copy(tarFile);
     tar->mode = zend_string_copy(mode);
+    tar->checkChksum = checkChksum;
     tar->fp = NULL;
     tar->size = 0;
     tar->origin_size = 0;
@@ -371,6 +375,7 @@ PHP_METHOD(Neptune_Archive_Tar, __construct)
 ZEND_BEGIN_ARG_INFO(arginfo_neptune_tar_construct, 0)
     ZEND_ARG_INFO(0, tarFile)
     ZEND_ARG_INFO(0, mode)
+    ZEND_ARG_INFO(0, checkChksum)
 ZEND_END_ARG_INFO()
 
 PHP_METHOD(Neptune_Archive_Tar, __destruct)
@@ -400,7 +405,7 @@ PHP_METHOD(Neptune_Archive_Tar, readFile)
     }
 
     // Find file in tar
-    if (find_file_in_tar(tar->fp, ZSTR_VAL(filename), &header) != 0) {
+    if (find_file_in_tar(tar, ZSTR_VAL(filename), &header) != 0) {
         zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
@@ -453,7 +458,7 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     }
 
     // Find file in tar
-    if (find_file_in_tar(tar->fp, ZSTR_VAL(filename), &header) != 0) {
+    if (find_file_in_tar(tar, ZSTR_VAL(filename), &header) != 0) {
         zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
@@ -528,7 +533,7 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
     }
 
     // Find file in source tar
-    if (find_file_in_tar(source_tar->fp, ZSTR_VAL(filename), &header) != 0) {
+    if (find_file_in_tar(source_tar, ZSTR_VAL(filename), &header) != 0) {
         zend_throw_exception(zend_ce_exception, "File not found in source tar archive", 0);
         return;
     }

@@ -6,6 +6,7 @@
 #endif
 
 #include <php.h>
+#include <stdbool.h>
 
 
 // Tar format constants
@@ -48,6 +49,18 @@ typedef struct {
     char padding[12];
 } tar_header_t;
 
+typedef struct {
+    zend_string *tarFile;
+    zend_string *mode;
+    bool checkChksum;
+    FILE *fp;
+    zend_long size;
+    zend_long origin_size;
+    zend_object std;
+} neptune_tar_t;
+
+#define Z_NEPTUNE_TAR_P(zv) \
+    ((neptune_tar_t*)((char *)(Z_OBJ_P(zv)) - XtOffsetOf(neptune_tar_t, std)))
 
 // Method declarations
 PHP_METHOD(Neptune_Archive_Tar, __construct);
@@ -57,13 +70,13 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile);
 PHP_METHOD(Neptune_Archive_Tar, addFrom);
 
 // Internal helper functions
-static int validate_tar_format(FILE *fp);
-static int read_tar_header(FILE *fp, tar_header_t *header);
+static int validate_tar_format(FILE *fp, bool checkChksum);
+static int read_tar_header(FILE *fp, tar_header_t *header, bool checkChksum);
 static int write_tar_header(FILE *fp, tar_header_t *header);
 static int calculate_checksum(tar_header_t *header);
 static int octal_to_int(const char *str, size_t len);
 static void int_to_octal(int num, char *str, size_t len);
-static int find_file_in_tar(FILE *fp, const char *filename, tar_header_t *header);
+static int find_file_in_tar(neptune_tar_t *tar, const char *filename, tar_header_t *header);
 static int extract_file_data(FILE *src, FILE *dst, size_t size);
 static int copy_file_data(FILE *src, FILE *dst, size_t size);
 static int mkdir_recursive(const char *path, mode_t mode);
