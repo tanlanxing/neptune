@@ -139,13 +139,63 @@ static int validate_tar_format(FILE *fp, bool checkChksum) {
     return 0;
 }
 
+static int get_member_name(neptune_tar_t *tar, tar_header_t *header, char *member_name, size_t size) {
+    if (header->typeflag == 'L') {
+        size_t link_size = octal_to_int(header->size, sizeof(header->size));
+        if (link_size == 0 || link_size >= size) {
+            zend_throw_exception(zend_ce_exception, "Get File name in tar archive failed: Longlink size error", 0);
+            return -1;
+        }
+
+        // read Longlink content
+        if (fread(member_name, 1, link_size, tar->fp) != link_size) {
+            zend_throw_exception(zend_ce_exception, "Get File name in tar archive failed: read Longlink content error", 0);
+            return -1;
+        }
+        member_name[link_size] = '\0';
+
+        // skip padding block (tar format is aligned by 512 bytes)
+        size_t padding = (TAR_BLOCK_SIZE - (link_size % TAR_BLOCK_SIZE)) % TAR_BLOCK_SIZE;
+        if (padding > 0) {
+            if (fseek(tar->fp, padding, SEEK_CUR) != 0) {
+                zend_throw_exception(zend_ce_exception, "Get File name in tar archive failed: align padding error when read Longlink", 0);
+                return -1;
+            }
+        }
+
+        // read next block (actual file header)
+        if (read_tar_header(tar->fp, header, tar->checkChksum) != 0) {
+            zend_throw_exception(zend_ce_exception, "Get File name in tar archive failed: missing file header after Longlink", 0);
+            return -1;
+        }
+    } else if (header->prefix[0] == '\0') {
+        // prefix is null，just use name
+        strncpy(member_name, header->name, sizeof(header->name));
+        member_name[sizeof(header->name)] = '\0';
+    } else {
+        size_t prefix_len = strnlen(header->prefix, sizeof(header->prefix));
+        size_t name_len = strnlen(header->name, sizeof(header->name));
+        strncpy(member_name, header->prefix, prefix_len);
+        member_name[prefix_len] = '/';
+        strncpy(member_name + prefix_len + 1, header->name, name_len);
+        member_name[prefix_len + 1 + name_len] = '\0';
+    }
+    return 0;
+}
+
 // Find file in tar archive
 static int find_file_in_tar(neptune_tar_t *tar, const char *filename, tar_header_t *header) {
     long pos = ftell(tar->fp);
+    char member_name[512];
     fseek(tar->fp, 0, SEEK_SET);
 
     while (read_tar_header(tar->fp, header, tar->checkChksum) == 0) {
-        if (strcmp(header->name, filename) == 0) {
+        if (get_member_name(tar, header, member_name, sizeof(member_name)) != 0) {
+            fseek(tar->fp, pos, SEEK_SET);
+            return -1;
+        }
+
+        if (strcmp(member_name, filename) == 0) {
             return 0;
         }
 
@@ -156,6 +206,7 @@ static int find_file_in_tar(neptune_tar_t *tar, const char *filename, tar_header
     }
 
     fseek(tar->fp, pos, SEEK_SET);
+    zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
     return -1;
 }
 
@@ -406,7 +457,6 @@ PHP_METHOD(Neptune_Archive_Tar, readFile)
 
     // Find file in tar
     if (find_file_in_tar(tar, ZSTR_VAL(filename), &header) != 0) {
-        zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
 
@@ -444,7 +494,6 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
     zend_string *filename, *path;
     tar_header_t header;
     FILE *outfile;
-    struct stat st;
     neptune_tar_t *tar = Z_NEPTUNE_TAR_P(ZEND_THIS);
 
     ZEND_PARSE_PARAMETERS_START(2, 2)
@@ -459,7 +508,6 @@ PHP_METHOD(Neptune_Archive_Tar, extractFile)
 
     // Find file in tar
     if (find_file_in_tar(tar, ZSTR_VAL(filename), &header) != 0) {
-        zend_throw_exception(zend_ce_exception, "File not found in tar archive", 0);
         return;
     }
 
@@ -534,7 +582,6 @@ PHP_METHOD(Neptune_Archive_Tar, addFrom)
 
     // Find file in source tar
     if (find_file_in_tar(source_tar, ZSTR_VAL(filename), &header) != 0) {
-        zend_throw_exception(zend_ce_exception, "File not found in source tar archive", 0);
         return;
     }
 
